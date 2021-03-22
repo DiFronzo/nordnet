@@ -131,3 +131,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Cookie
+nordnet_cookies.json
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride

@@ -1,24 +1,7 @@
-"""
-    Nordnet
-    =======
-
-    A simple wrapper around nordnet.no's (not) public api
-
-    Increase columns if using dataframes and cli
+#!/usr/bin/env python3
 import pandas as pd
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
-
-"""
-
-# import talib
-import pandas as pd
-# import numpy as np
-# import re
 import datetime
 import simplejson as json
-# import math
 import requests
 import time
 import os
@@ -28,6 +11,12 @@ from functools import wraps
 
 from nordnet.settings import LOCAL_TZ, EXCHANGES, INDEXES, BASE_HOST, BASE_URL, COOKIE_FILE, COOKIE_MAX_TIME
 
+# ███╗   ██╗ ██████╗ ██████╗ ██████╗ ███╗   ██╗███████╗████████╗
+# ████╗  ██║██╔═══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝╚══██╔══╝
+# ██╔██╗ ██║██║   ██║██████╔╝██║  ██║██╔██╗ ██║█████╗     ██║
+# ██║╚██╗██║██║   ██║██╔══██╗██║  ██║██║╚██╗██║██╔══╝     ██║
+# ██║ ╚████║╚██████╔╝██║  ██║██████╔╝██║ ╚████║███████╗   ██║
+# ╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═╝
 
 def before(f):
     @wraps(f)
@@ -41,16 +30,18 @@ def before(f):
 
 
 class Nordnet:
+    """
+        Example usage:
+            from nordnet import Nordnet
+            nn = Nordnet()
+
+            print(nn.main_search("DNB"))
+    """
 
     def __init__(self):
 
-        self.HEADERS = {}
-        self.HEADERS['client-id'] = 'NEXT'
-        self.HEADERS['Accept'] = 'application/json'
-        self.HEADERS['Host'] = BASE_HOST
-        self.HEADERS['Origin'] = BASE_URL
-        self.HEADERS['Referer'] = BASE_URL
-
+        self.HEADERS = {'client-id': 'NEXT', 'Accept': 'application/json', 'Host': BASE_HOST, 'Origin': BASE_URL,
+                        'Referer': BASE_URL}
         self.COOKIES = None
         self.NTAG = None
 
@@ -73,8 +64,8 @@ class Nordnet:
 
     def _cookie_age(self) -> int:
         try:
-            return time.time() - os.path.getmtime(COOKIE_FILE)
-        except:
+            return int(time.time() - os.path.getmtime(COOKIE_FILE))
+        except FileNotFoundError:
             return COOKIE_MAX_TIME + 10
 
     def _mk_session(self, force=True):
@@ -83,7 +74,7 @@ class Nordnet:
 
                 r = requests.get('{}/market'.format(BASE_URL), headers=self.HEADERS)
 
-                if r.status_code == 200:
+                if r.status_code == 200 and r.cookies is not None:
                     self.COOKIES = requests.utils.dict_from_cookiejar(r.cookies)
 
                     html = r.text.split('<script>window.__initialState__=')[1].split(';</script>')[0]
@@ -96,7 +87,6 @@ class Nordnet:
                     self._open_cookies()
 
             self.HEADERS['ntag'] = self.NTAG
-
 
         except Exception as e:
             raise Exception('Could not init session', e)
@@ -117,16 +107,6 @@ class Nordnet:
             return True, resp.json()
 
         return False, {}
-
-    def _get_json(self, url, default_ret=[]) -> (bool, list):
-        resp = requests.get(url=url,
-                            cookies=self.COOKIES,
-                            headers=self.HEADERS)
-        return resp
-        if resp.status_code == 200:
-            return resp
-
-        return default_ret
 
     def _GET(self, relative_url, raw_response=False) -> (bool, list):
         resp = requests.get('{}/api/2/{}'.format(BASE_URL, relative_url),
@@ -204,6 +184,21 @@ class Nordnet:
             iid = r['instrument_id']
     """
 
+    def _set_pd_values(self, type_set, iloc=False) -> pd.DataFrame:
+        df = pd.DataFrame(type_set)
+        df['tick_timestamp'] = pd.to_datetime(df.tick_timestamp, unit='ms')
+        df['tick_timestamp'] = df['tick_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
+        df['trade_timestamp'] = pd.to_datetime(df.trade_timestamp, unit='ms')
+        df['trade_timestamp'] = df['trade_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
+        df = df.reset_index(drop=False)
+        df.set_index('tick_timestamp', inplace=True)
+
+        df.sort_index(inplace=True, ascending=True)
+        if iloc:
+            df = df.iloc[::-1]
+
+        return df
+
     @before
     def get_trades(self, instrument_id, max_trades=10000000000000) -> (bool, list):
         return self._GET('instruments/{}/trades?count={}'.format(instrument_id, max_trades))
@@ -213,16 +208,7 @@ class Nordnet:
 
         if status is True:
             try:
-                df = pd.DataFrame(trades[0]['trades'])
-                df['tick_timestamp'] = pd.to_datetime(df.tick_timestamp, unit='ms')
-                df['tick_timestamp'] = df['tick_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
-                df['trade_timestamp'] = pd.to_datetime(df.trade_timestamp, unit='ms')
-                df['trade_timestamp'] = df['trade_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
-                df = df.reset_index(drop=False)
-                df.set_index('tick_timestamp', inplace=True)
-
-                df.sort_index(inplace=True, ascending=True)
-                # df = df.iloc[::-1]
+                df = self._set_pd_values(trades[0]['trades'])
                 if vwap is True:
                     df['vwap'] = (df.volume * df.price).cumsum() / df.volume.cumsum()
                 if turnover is True:
@@ -242,17 +228,7 @@ class Nordnet:
         status, prices = self.get_prices(instrument_id)
 
         if status is True:
-            df = pd.DataFrame(prices)
-            df['tick_timestamp'] = pd.to_datetime(df.tick_timestamp, unit='ms')
-            df['tick_timestamp'] = df['tick_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
-            df['trade_timestamp'] = pd.to_datetime(df.trade_timestamp, unit='ms')
-            df['trade_timestamp'] = df['trade_timestamp'].dt.tz_localize('UTC').dt.tz_convert(LOCAL_TZ)
-
-            df = df.reset_index(drop=False)
-            df.set_index('tick_timestamp', inplace=True)
-            df = df.iloc[::-1]
-
-            return df
+            return self._set_pd_values(prices, iloc=True)
 
         return pd.DataFrame()
 
@@ -289,7 +265,8 @@ class Nordnet:
     @before
     def get_historical_returns(self, instrument_id, local_currency=True, show_details=True) -> (bool, list):
         return self._GET(
-            'instruments/historical/returns/{}?local_currency=true&show_details=true'.format(instrument_id))
+            'instruments/historical/returns/{}?local_currency={}&show_details={}'.format(
+                instrument_id, local_currency, show_details))
 
     @before
     def get_instrument_stats(self, instrument_id) -> (bool, list):
@@ -362,7 +339,7 @@ class Nordnet:
         return self._GET('news/?news_lang=no,en&limit={0}&offset={1}'.format(max_number, page))
 
     def get_all_news_pd(self, max_number=25, page=0) -> pd.DataFrame:
-        status, news = self.get_all_news(max_number=25, page=0)
+        status, news = self.get_all_news(max_number=max_number, page=page)
         if status is True:
             df = pd.DataFrame(news)
             df['datetime'] = pd.to_datetime(df.timestamp, unit='ms')
@@ -424,7 +401,7 @@ class Nordnet:
         return self._GET('tradables/trades/{}:{}?count={}&weeks={}'.format(market_id, identifier, max_trades, weeks))
 
     def get_tradables_trades_pd(self, identifier, market_id, max_trades=10000000, weeks=5) -> pd.DataFrame:
-        status, trades = self.get_tradables_trades(market_id, identifier, max_trades=10000000, weeks=5)
+        status, trades = self.get_tradables_trades(market_id, identifier, max_trades=max_trades, weeks=weeks)
         if status is True:
             df = pd.DataFrame(trades[0]['trades'])
             df['datetime'] = pd.to_datetime(df.trade_timestamp, unit='ms')
@@ -475,42 +452,41 @@ class Nordnet:
     @before
     def get_turnover_list(self, exchange_list='no:ose', max_instruments=10) -> (bool, list):
         """
-        # Highest turnover
-        # Instrument search - paging with limit=100, offset=0
-        # sort_attribute turnover_volume turnover_normalized turnover name diff_pct yield_1w yield_1m yield_3m yield_ytd yield_1y yield_3y yield_5Y
-        # pe ps pb eps dividend_yield dividend_per_share
-        # no:ose no:merk no:osloaxess etc
-        # exchange_list=no:ose|exchange_list=no:merk|exchange_list=no:osloaxess
-        # apply_filters=exchange_country=DK NO FI SE DE US CA
-        # entity_type MINIFUTURELIST
-        :param exchange_list:
-        :param max_instruments:
-        :return:
+        # Highest turnover # Instrument search - paging with limit=100, offset=0 # sort_attribute turnover_volume
+        turnover_normalized turnover name diff_pct yield_1w yield_1m yield_3m yield_ytd yield_1y yield_3y yield_5Y #
+        pe ps pb eps dividend_yield dividend_per_share # no:ose no:merk no:osloaxess etc #
+        exchange_list=no:ose|exchange_list=no:merk|exchange_list=no:osloaxess # apply_filters=exchange_country=DK NO
+        FI SE DE US CA # entity_type MINIFUTURELIST :param exchange_list: :param max_instruments: :return:
         """
         return self._GET(
-            'instrument_search/query/stocklist?limit={0}&sort_attribute=turnover_normalized&sort_order=desc&apply_filters=exchange_list={1}|diff_pct=[* TO 900]'.format(
+            'instrument_search/query/stocklist?limit={'
+            '0}&sort_attribute=turnover_normalized&sort_order=desc&apply_filters=exchange_list={1}|diff_pct=[* TO '
+            '900]'.format(
                 max_instruments, exchange_list))
 
     @before
     def get_winner_list(self, exchange_list='no:ose', max_instruments=10) -> (bool, list):
         return self._GET(
-            'instrument_search/query/stocklist?limit={0}&sort_attribute=diff_pct&sort_order=desc&apply_filters=exchange_list={1}|diff_pct=[* TO 900]'.format(
+            'instrument_search/query/stocklist?limit={'
+            '0}&sort_attribute=diff_pct&sort_order=desc&apply_filters=exchange_list={1}|diff_pct=[* TO 900]'.format(
                 max_instruments, exchange_list))
 
     @before
     def get_looser_list(self, exchange_list='no:ose', max_instruments=10) -> (bool, list):
         return self._GET(
-            'instrument_search/query/stocklist?limit={0}&sort_attribute=diff_pct&sort_order=asc&apply_filters=exchange_list={1}|diff_pct=[* TO 900]'.format(
+            'instrument_search/query/stocklist?limit={'
+            '0}&sort_attribute=diff_pct&sort_order=asc&apply_filters=exchange_list={1}|diff_pct=[* TO 900]'.format(
                 max_instruments, exchange_list))
 
     @before
     def get_ranking_list(self, max_instruments=10, sort_order='desc', exchange_list='no:ose') -> (bool, list):
         return self._GET(
-            'instrument_search/query/stocklist?limit={0}&sort_attribute=diff_pct&sort_order={1}&apply_filters=exchange_list={2}|diff_pct=[* TO 900]'.format(
+            'instrument_search/query/stocklist?limit={0}&sort_attribute=diff_pct&sort_order={'
+            '1}&apply_filters=exchange_list={2}|diff_pct=[* TO 900]'.format(
                 max_instruments, sort_order, exchange_list))
 
     @before
-    def print_ranking_list(self, max_instruments=10, sort_order='desc', order=1) -> (bool, list):
+    def print_ranking_list(self, max_instruments=10, sort_order='desc', order=1):
         status, results = self.get_ranking_list(max_instruments=max_instruments, sort_order=sort_order)
 
         if status is True:
@@ -546,13 +522,14 @@ class Nordnet:
     def get_instrument_attributes(self, entity_type) -> (bool, list):
         # Markets  INTEREST COMMODITY CURRENCY INDEX STOCKLIST
         return self._GET(
-            'instrument_search/attributes?entity_type={1}&expand=exchange_list&apply_filters=exchange_country=NO'.format(
+            'instrument_search/attributes?entity_type={}&expand=exchange_list&apply_filters=exchange_country=NO'.format(
                 entity_type))
 
     @before
     def get_turnover_norm_list(self, sort_order='desc', max_instruments=10) -> (bool, list):
         return self._GET(
-            'instrument_search/query/stocklist?limit={0}&sort_attribute=turnover_normalized&sort_order={1}&apply_filters=exchange_country=NO|exchange_list=no:ose|diff_pct=[* TO 900]'.format(
+            'instrument_search/query/stocklist?limit={}&sort_attribute=turnover_normalized&sort_order={'
+            '}&apply_filters=exchange_country=NO|exchange_list=no:ose|diff_pct=[* TO 900]'.format(
                 max_instruments, sort_order))
 
     @before
@@ -639,7 +616,9 @@ class Nordnet:
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
     @before
-    def get_all_instruments(self, countries=['no', 'se']) -> (bool, list):
+    def get_all_instruments(self, countries=None) -> (bool, list):
+        if countries is None:
+            countries = ['no', 'se']
         limit = 100
         offset = 0
         free_text_search = '|'.join(
@@ -661,7 +640,9 @@ class Nordnet:
 
         return True, results
 
-    def get_all_instruments_pd(self, countries=['no', 'se']) -> pd.DataFrame:
+    def get_all_instruments_pd(self, countries=None) -> pd.DataFrame:
+        if countries is None:
+            countries = ['no', 'se']
         status, instruments = self.get_all_instruments(countries=countries)
 
         if status is True:
@@ -679,8 +660,10 @@ class Nordnet:
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
     @before
-    def get_all_indicators(self, countries=['no', 'se']) -> (bool, list):
+    def get_all_indicators(self, countries=None) -> (bool, list):
 
+        if countries is None:
+            countries = ['no', 'se']
         limit = 100
         offset = 0
         more_to_go = True
@@ -700,7 +683,9 @@ class Nordnet:
 
         return True, results
 
-    def get_all_indicators_pd(self, countries=['no', 'se']) -> pd.DataFrame:
+    def get_all_indicators_pd(self, countries=None) -> pd.DataFrame:
+        if countries is None:
+            countries = ['no', 'se']
         status, indicators = self.get_all_indicators(countries=countries)
 
         if status is True:
@@ -717,16 +702,19 @@ class Nordnet:
 
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
-    @before
-    def get_all_commodities(self, countries=['no', 'se']) -> (bool, list):
-
-        limit = 100
-        offset = 0
-        more_to_go = True
+    def _check_list(self, type_list, offset, limit) -> list:
         results = []
+        more_to_go = True
+        choices = {
+            'commodities': self._get_commodity_list(page=offset, limit=limit),
+            'forex': self._get_forex_list(page=offset, limit=limit),
+            'interest': self._get_interest_list(page=offset, limit=limit)
+        }
+
         while more_to_go is True:
 
-            status, rows, total, r = self._get_commodity_list(page=offset, limit=limit)
+            status, rows, total, r = choices.get(type_list, 'default')
+
             if status is True:
                 results += [{**x['instrument_info'], **x['indicator_info'],
                              **x['exchange_info'],
@@ -738,9 +726,23 @@ class Nordnet:
             if len(results) >= total - 1 or limit > rows:
                 more_to_go = False
 
+        return results
+
+    @before
+    def get_all_commodities(self, countries=None) -> (bool, list):
+
+        if countries is None:
+            countries = ['no', 'se']
+
+        limit = 100
+        offset = 0
+        results = self._check_list(type_list='commodities', offset=offset, limit=limit)
+
         return True, results
 
-    def get_all_commodities_pd(self, countries=['no', 'se']) -> pd.DataFrame:
+    def get_all_commodities_pd(self, countries=None) -> pd.DataFrame:
+        if countries is None:
+            countries = ['no', 'se']
         status, commodities = self.get_all_commodities(countries=countries)
 
         if status is True:
@@ -758,29 +760,20 @@ class Nordnet:
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
     @before
-    def get_all_interest(self, countries=['no', 'se']) -> (bool, list):
+    def get_all_interest(self, countries=None) -> (bool, list):
+
+        if countries is None:
+            countries = ['no', 'se']
 
         limit = 100
         offset = 0
-        more_to_go = True
-        results = []
-        while more_to_go is True:
-
-            status, rows, total, r = self._get_interest_list(page=offset, limit=limit)
-            if status is True:
-                results += [{**x['instrument_info'], **x['indicator_info'],
-                             **x['exchange_info'],
-                             **self._fix_price_info(x['price_info']),
-                             **x['historical_returns_info']} for x in r]
-
-            offset += limit
-
-            if len(results) >= total - 1 or limit > rows:
-                more_to_go = False
+        results = self._check_list(type_list='interest', offset=offset, limit=limit)
 
         return True, results
 
-    def get_all_interest_pd(self, countries=['no', 'se']) -> pd.DataFrame:
+    def get_all_interest_pd(self, countries=None) -> pd.DataFrame:
+        if countries is None:
+            countries = ['no', 'se']
         status, interest = self.get_all_interest(countries=countries)
 
         if status is True:
@@ -790,7 +783,6 @@ class Nordnet:
 
         return pd.DataFrame()
 
-    # FOREX
     def _get_forex_list(self, page, limit) -> (bool, list):
         status, result = self._GET(
             'instrument_search/query/indicator?entity_type=CURRENCY&limit={}&offset={}'.format(limit, page))
@@ -798,29 +790,21 @@ class Nordnet:
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
     @before
-    def get_all_forex(self, countries=['no', 'se']) -> (bool, list):
+    def get_all_forex(self, countries=None) -> (bool, list):
+
+        if countries is None:
+            countries = ['no', 'se']
 
         limit = 100
         offset = 0
-        more_to_go = True
-        results = []
-        while more_to_go is True:
-
-            status, rows, total, r = self._get_forex_list(page=offset, limit=limit)
-            if status is True:
-                results += [{**x['instrument_info'], **x['indicator_info'],
-                             **x['exchange_info'],
-                             **self._fix_price_info(x['price_info']),
-                             **x['historical_returns_info']} for x in r]
-
-            offset += limit
-
-            if len(results) >= total - 1 or limit > rows:
-                more_to_go = False
+        results = self._check_list(type_list='forex', offset=offset, limit=limit)
 
         return True, results
 
-    def get_all_forex_pd(self, countries=['no', 'se']) -> pd.DataFrame:
+    def get_all_forex_pd(self, countries=None) -> pd.DataFrame:
+        if countries is None:
+            countries = ['no', 'se']
+
         status, forex = self.get_all_forex(countries=countries)
 
         if status is True:

@@ -11,7 +11,7 @@ setuptools.setup(
     description="A wrapper for nordnet.no public apis",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/ntftrader/nordnet",
+    url="https://github.com/DiFronzo/nordnet",
     packages=setuptools.find_packages(),
     install_requires=['requests', 'simplejson', 'pandas'],
     classifiers=[
