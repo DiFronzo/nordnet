@@ -11,6 +11,7 @@ from functools import wraps
 
 from nordnet.settings import LOCAL_TZ, EXCHANGES, INDEXES, BASE_HOST, BASE_URL, COOKIE_FILE, COOKIE_MAX_TIME
 
+
 # ███╗   ██╗ ██████╗ ██████╗ ██████╗ ███╗   ██╗███████╗████████╗
 # ████╗  ██║██╔═══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝╚══██╔══╝
 # ██╔██╗ ██║██║   ██║██████╔╝██║  ██║██╔██╗ ██║█████╗     ██║
@@ -239,8 +240,8 @@ class Nordnet:
     @before
     def get_history(self, instrument_id, weeks=52):
         return self._GET(
-            'instruments/historical/prices/{}?fields=open,high,low,last,volume,turnover&weeks={}'.format(instrument_id,
-                                                                                                         weeks))
+            'instruments/historical/prices/{}?fields=open,high,low,last,volume&weeks={}'.format(instrument_id,
+                                                                                                weeks))
 
     def get_history_pd(self, instrument_id, weeks=52) -> pd.DataFrame:
         status, history = self.get_history(instrument_id, weeks)
@@ -652,7 +653,6 @@ class Nordnet:
 
         return pd.DataFrame()
 
-    # indicators
     def _get_indicator_list(self, page, limit) -> (bool, list):
         status, result = self._GET(
             'instrument_search/query/indicator?entity_type=INDEX&limit={}&offset={}'.format(limit, page))
@@ -696,24 +696,24 @@ class Nordnet:
         return pd.DataFrame()
 
     # COMMODITIES
-    def _get_commodity_list(self, page, limit) -> (bool, list):
+    def _get_commodity_list(self, limit, offset) -> (bool, list):
         status, result = self._GET(
-            'instrument_search/query/indicator?entity_type=COMMODITY&limit={}&offset={}'.format(limit, page))
+            'instrument_search/query/indicator?entity_type=COMMODITY&limit={}&offset={}'.format(limit, offset))
 
         return status, result.get('rows', 0), result.get('total_hits', 0), result.get('results')
 
-    def _check_list(self, type_list, offset, limit) -> list:
+    def _check_list(self, type_list: str, page: int, limit: int) -> list:
         results = []
         more_to_go = True
         choices = {
-            'commodities': self._get_commodity_list(page=offset, limit=limit),
-            'forex': self._get_forex_list(page=offset, limit=limit),
-            'interest': self._get_interest_list(page=offset, limit=limit)
+            'commodities': self._get_commodity_list(offset=page, limit=limit),
+            'forex': self._get_forex_list(page=page, limit=limit),
+            'interest': self._get_interest_list(page=page, limit=limit)
         }
 
         while more_to_go is True:
 
-            status, rows, total, r = choices.get(type_list, 'default')
+            status, rows, total, r = choices.get(type_list.lower(), 'default')
 
             if status is True:
                 results += [{**x['instrument_info'], **x['indicator_info'],
@@ -735,8 +735,8 @@ class Nordnet:
             countries = ['no', 'se']
 
         limit = 100
-        offset = 0
-        results = self._check_list(type_list='commodities', offset=offset, limit=limit)
+        page = 0
+        results = self._check_list(type_list='commodities', page=page, limit=limit)
 
         return True, results
 
@@ -767,7 +767,7 @@ class Nordnet:
 
         limit = 100
         offset = 0
-        results = self._check_list(type_list='interest', offset=offset, limit=limit)
+        results = self._check_list(type_list='interest', page=offset, limit=limit)
 
         return True, results
 
@@ -797,7 +797,7 @@ class Nordnet:
 
         limit = 100
         offset = 0
-        results = self._check_list(type_list='forex', offset=offset, limit=limit)
+        results = self._check_list(type_list='forex', page=offset, limit=limit)
 
         return True, results
 
