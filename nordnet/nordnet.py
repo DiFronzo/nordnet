@@ -813,3 +813,23 @@ class Nordnet:
             return df
 
         return pd.DataFrame()
+    
+    @before
+    def get_company_data_summary(self, instrument_id) -> (bool, list):
+        return self._GET('company_data/summary/{}'.format(instrument_id))
+
+    @before
+    def get_exchange_rates(self) -> (bool, list):
+        return self._GET('exchange_rates')
+
+    def get_exchange_rates_pd(self) -> pd.DataFrame:
+        status, exchange_rates = self.get_exchange_rates()
+
+        if status is True:
+            df = pd.DataFrame(exchange_rates)
+            df.set_index('from', inplace=True)
+            df = df.iloc[::-1]
+
+            return df
+
+        return pd.DataFrame()
